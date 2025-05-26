@@ -136,92 +136,112 @@ namespace RecipeBookApp
 
         private void btnAddRecipe_Click(object sender, EventArgs e)
         {
-                // Перевірка на заповнення обов'язкових полів
-                if (string.IsNullOrEmpty(txtName.Text.Trim()) ||
-                    string.IsNullOrEmpty(txtDescription.Text.Trim()) ||
-                    string.IsNullOrEmpty(txtCookingTime.Text.Trim()) ||
-                    string.IsNullOrEmpty(txtCategory.Text.Trim()) ||
-                    string.IsNullOrEmpty(txtTotalCalories.Text.Trim()) ||
-                    string.IsNullOrEmpty(txtInstructions.Text.Trim()))
+            if (!AreRequiredFieldsFilled())
+            {
+                MessageBox.Show("Будь ласка, заповніть всі обов'язкові поля.", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            try
+            {
+                int recipeId = AddRecipeToDatabase();
+
+                AddIngredientsToRecipe(recipeId);
+
+                MessageBox.Show("Рецепт успішно додано!", "Підтвердження", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                this.Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Виникла помилка: {ex.Message}", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        private bool AreRequiredFieldsFilled()
+        {
+            return !string.IsNullOrWhiteSpace(txtName.Text)
+                && !string.IsNullOrWhiteSpace(txtDescription.Text)
+                && !string.IsNullOrWhiteSpace(txtCookingTime.Text)
+                && !string.IsNullOrWhiteSpace(txtCategory.Text)
+                && !string.IsNullOrWhiteSpace(txtTotalCalories.Text)
+                && !string.IsNullOrWhiteSpace(txtInstructions.Text);
+        }
+
+        private int AddRecipeToDatabase()
+        {
+            string connectionString = "Server=localhost;Database=recipebookdb;Uid=root;Pwd=;";
+            using (MySqlConnection connection = new MySqlConnection(connectionString))
+            {
+                connection.Open();
+                string query = @"
+            INSERT INTO Recipes (Name, Description, CookingTime, Category, TotalCalories, CookingInstructions, VideoUrl, ImageUrl)
+            VALUES (@Name, @Description, @CookingTime, @Category, @TotalCalories, @CookingInstructions, @VideoUrl, @ImageUrl);
+            SELECT LAST_INSERT_ID();";
+
+                using (MySqlCommand command = new MySqlCommand(query, connection))
                 {
-                    MessageBox.Show("Будь ласка, заповніть всі обов'язкові поля.", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
+                    command.Parameters.AddWithValue("@Name", txtName.Text.Trim());
+                    command.Parameters.AddWithValue("@Description", txtDescription.Text.Trim());
+                    command.Parameters.AddWithValue("@CookingTime", txtCookingTime.Text.Trim());
+                    command.Parameters.AddWithValue("@Category", txtCategory.Text.Trim());
+                    command.Parameters.AddWithValue("@TotalCalories", txtTotalCalories.Text.Trim());
+                    command.Parameters.AddWithValue("@CookingInstructions", txtInstructions.Text.Trim());
+                    command.Parameters.AddWithValue("@VideoUrl", txtVideoUrl.Text.Trim());
+                    command.Parameters.AddWithValue("@ImageUrl", txtImageUrl.Text.Trim());
 
-                string connectionString = "Server=localhost;Database=recipebookdb;Uid=root;Pwd=;";
-                using (MySqlConnection connection = new MySqlConnection(connectionString))
+                    return Convert.ToInt32(command.ExecuteScalar());
+                }
+            }
+        }
+
+        private void AddIngredientsToRecipe(int recipeId)
+        {
+            string connectionString = "Server=localhost;Database=recipebookdb;Uid=root;Pwd=;";
+            using (MySqlConnection connection = new MySqlConnection(connectionString))
+            {
+                connection.Open();
+
+                foreach (var ingredient in ingredients)
                 {
-                    try
+                    int ingredientId = ingredient.Item1;
+
+                    if (ingredientId == -1)
                     {
-                        connection.Open();
-                        string query = @"
-                        INSERT INTO Recipes (Name, Description, CookingTime, Category, TotalCalories, CookingInstructions, VideoUrl, ImageUrl)
-                        VALUES (@Name, @Description, @CookingTime, @Category, @TotalCalories, @CookingInstructions, @VideoUrl, @ImageUrl);
-                        SELECT LAST_INSERT_ID();";
-                        using (MySqlCommand command = new MySqlCommand(query, connection))
-                        {
-                            command.Parameters.AddWithValue("@Name", txtName.Text.Trim());
-                            command.Parameters.AddWithValue("@Description", txtDescription.Text.Trim());
-                            command.Parameters.AddWithValue("@CookingTime", txtCookingTime.Text.Trim());
-                            command.Parameters.AddWithValue("@Category", txtCategory.Text.Trim());
-                            command.Parameters.AddWithValue("@TotalCalories", txtTotalCalories.Text.Trim());
-                            command.Parameters.AddWithValue("@CookingInstructions", txtInstructions.Text.Trim());
-                            command.Parameters.AddWithValue("@VideoUrl", txtVideoUrl.Text.Trim());
-                            command.Parameters.AddWithValue("@ImageUrl", txtImageUrl.Text.Trim());
-
-                            int recipeId = Convert.ToInt32(command.ExecuteScalar());
-
-                            foreach (var ingredient in ingredients)
-                            {
-                                if (ingredient.Item1 == -1)
-                                {
-                                    string ingredientInsertQuery = @"
-                                    INSERT INTO Ingredients (Name, Calories)
-                                    VALUES (@Name, @Calories);
-                                    SELECT LAST_INSERT_ID();";
-                                    using (MySqlCommand ingredientInsertCommand = new MySqlCommand(ingredientInsertQuery, connection))
-                                    {
-                                        ingredientInsertCommand.Parameters.AddWithValue("@Name", ingredient.Item2);
-                                        ingredientInsertCommand.Parameters.AddWithValue("@Calories", ingredient.Item4);
-                                        int ingredientId = Convert.ToInt32(ingredientInsertCommand.ExecuteScalar());
-
-                                        string recipeIngredientQuery = @"
-                                        INSERT INTO RecipeIngredients (RecipeId, IngredientId, Quantity)
-                                        VALUES (@RecipeId, @IngredientId, @Quantity)";
-                                        using (MySqlCommand recipeIngredientCommand = new MySqlCommand(recipeIngredientQuery, connection))
-                                        {
-                                            recipeIngredientCommand.Parameters.AddWithValue("@RecipeId", recipeId);
-                                            recipeIngredientCommand.Parameters.AddWithValue("@IngredientId", ingredientId);
-                                            recipeIngredientCommand.Parameters.AddWithValue("@Quantity", ingredient.Item3);
-                                            recipeIngredientCommand.ExecuteNonQuery();
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    string recipeIngredientQuery = @"
-                                    INSERT INTO RecipeIngredients (RecipeId, IngredientId, Quantity)
-                                    VALUES (@RecipeId, @IngredientId, @Quantity)";
-                                    using (MySqlCommand recipeIngredientCommand = new MySqlCommand(recipeIngredientQuery, connection))
-                                    {
-                                        recipeIngredientCommand.Parameters.AddWithValue("@RecipeId", recipeId);
-                                        recipeIngredientCommand.Parameters.AddWithValue("@IngredientId", ingredient.Item1);
-                                        recipeIngredientCommand.Parameters.AddWithValue("@Quantity", ingredient.Item3);
-                                        recipeIngredientCommand.ExecuteNonQuery();
-                                    }
-                                }
-                            }
-                        }
-
-                        MessageBox.Show("Рецепт успішно додано!", "Підтвердження", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        this.Close();
-
+                        ingredientId = InsertNewIngredient(connection, ingredient.Item2, ingredient.Item4);
                     }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Виникла помилка: {ex.Message}", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+
+                    InsertRecipeIngredient(connection, recipeId, ingredientId, ingredient.Item3);
                 }
+            }
+        }
+
+        private int InsertNewIngredient(MySqlConnection connection, string name, double calories)
+        {
+            string query = @"
+        INSERT INTO Ingredients (Name, Calories)
+        VALUES (@Name, @Calories);
+        SELECT LAST_INSERT_ID();";
+
+            using (MySqlCommand command = new MySqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@Name", name);
+                command.Parameters.AddWithValue("@Calories", calories);
+                return Convert.ToInt32(command.ExecuteScalar());
+            }
+        }
+
+        private void InsertRecipeIngredient(MySqlConnection connection, int recipeId, int ingredientId, string quantity)
+        {
+            string query = @"
+        INSERT INTO RecipeIngredients (RecipeId, IngredientId, Quantity)
+        VALUES (@RecipeId, @IngredientId, @Quantity)";
+
+            using (MySqlCommand command = new MySqlCommand(query, connection))
+            {
+                command.Parameters.AddWithValue("@RecipeId", recipeId);
+                command.Parameters.AddWithValue("@IngredientId", ingredientId);
+                command.Parameters.AddWithValue("@Quantity", quantity);
+                command.ExecuteNonQuery();
+            }
         }
 
         private void lstIngredients_SelectedIndexChanged(object sender, EventArgs e)
