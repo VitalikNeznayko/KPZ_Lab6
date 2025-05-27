@@ -2,6 +2,7 @@
 using System.Windows.Forms;
 using MySql.Data.MySqlClient;
 using System.Data;
+using System.Collections.Generic;
 
 namespace RecipeBookApp
 {
@@ -15,6 +16,27 @@ namespace RecipeBookApp
         {
             InitializeComponent();
             loggedInUserId = userId;
+        }
+
+        private MySqlConnection GetOpenConnection()
+        {
+            var connection = new MySqlConnection(connectionString);
+            connection.Open();
+            return connection;
+        }
+
+        private DataTable GetDataTable(string query, params MySqlParameter[] parameters)
+        {
+            using (var connection = GetOpenConnection())
+            using (var adapter = new MySqlDataAdapter(query, connection))
+            {
+                if (parameters != null)
+                    adapter.SelectCommand.Parameters.AddRange(parameters);
+
+                var table = new DataTable();
+                adapter.Fill(table);
+                return table;
+            }
         }
 
         private void Form1_Load(object sender, EventArgs e)
@@ -38,77 +60,79 @@ namespace RecipeBookApp
         private void LoadCategories()
         {
             pnlCategories.Controls.Clear();
+
             using (MySqlConnection connection = new MySqlConnection(connectionString))
             {
                 connection.Open();
                 string query = "SELECT DISTINCT Category FROM Recipes";
                 using (MySqlCommand command = new MySqlCommand(query, connection))
+                using (MySqlDataReader reader = command.ExecuteReader())
                 {
-                    using (MySqlDataReader reader = command.ExecuteReader())
+                    int buttonY = 70;
+
+                    while (reader.Read())
                     {
-                        int buttonY = 70;
-                        while (reader.Read())
-                        {
-                            string category = reader["Category"].ToString();
-                            Button btnCategory = new Button
-                            {
-                                Text = category,
-                                BackColor = System.Drawing.Color.LightGray,
-                                FlatStyle = FlatStyle.Flat,
-                                Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Bold),
-                                Location = new System.Drawing.Point(3, buttonY),
-                                Size = new System.Drawing.Size(194, 50)
-                            };
-                            btnCategory.Click += (s, e) => {
+                        string category = reader["Category"].ToString();
+                        Button btnCategory = CreateCategoryButton(
+                            category,
+                            (s, e) => {
                                 LoadRecipes(category);
-                                HighlightActiveButton(btnCategory);
-                            };
-                            pnlCategories.Controls.Add(btnCategory);
-                            buttonY += 60;
-                        }
+                                HighlightActiveButton((Button)s);
+                            },
+                            new System.Drawing.Point(3, buttonY)
+                        );
+                        pnlCategories.Controls.Add(btnCategory);
+                        buttonY += 60;
                     }
                 }
             }
 
             // всі категорії
-            Button btnAllCategories = new Button
-            {
-                Text = "Усі категорії",
-                BackColor = System.Drawing.Color.LightGray,
-                FlatStyle = FlatStyle.Flat,
-                Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Bold),
-                Location = new System.Drawing.Point(3, 10),
-                Size = new System.Drawing.Size(194, 50)
-            };
-            btnAllCategories.Click += (s, e) => {
-                LoadRecipes();
-                HighlightActiveButton(btnAllCategories);
-            };
+            Button btnAllCategories = CreateCategoryButton(
+                "Усі категорії",
+                (s, e) => {
+                    LoadRecipes();
+                    HighlightActiveButton((Button)s);
+                },
+                new System.Drawing.Point(3, 10)
+            );
             pnlCategories.Controls.Add(btnAllCategories);
         }
 
+
+        private Button CreateCategoryButton(string text, EventHandler onClick, System.Drawing.Point location)
+        {
+            Button button = new Button
+            {
+                Text = text,
+                BackColor = System.Drawing.Color.LightGray,
+                FlatStyle = FlatStyle.Flat,
+                Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Bold),
+                Location = location,
+                Size = new System.Drawing.Size(194, 50)
+            };
+            button.Click += onClick;
+            return button;
+        }
+
+
         private void LoadRecipes(string category = null)
         {
-            using (MySqlConnection connection = new MySqlConnection(connectionString))
+            string query = @"
+            SELECT Id, Name AS 'Назва рецепту', Category AS 'Категорія', 
+               CookingTime AS 'Час приготування', TotalCalories AS 'Калорії' 
+            FROM Recipes";
+
+            var parameters = new List<MySqlParameter>();
+            if (!string.IsNullOrEmpty(category))
             {
-                connection.Open();
-                string query = "SELECT Id, Name AS 'Назва рецепту', Category AS 'Категорія', CookingTime AS 'Час приготування', TotalCalories AS 'Калорії' FROM Recipes";
-                if (category != null)
-                {
-                    query += " WHERE Category = @category";
-                }
-                using (MySqlDataAdapter adapter = new MySqlDataAdapter(query, connection))
-                {
-                    if (category != null)
-                    {
-                        adapter.SelectCommand.Parameters.AddWithValue("@category", category);
-                    }
-                    DataTable dataTable = new DataTable();
-                    adapter.Fill(dataTable);
-                    dgvRecipes.DataSource = dataTable;
-                    dgvRecipes.Columns["Id"].Visible = false;
-                }
+                query += " WHERE Category = @category";
+                parameters.Add(new MySqlParameter("@category", category));
             }
+
+            DataTable dataTable = GetDataTable(query, parameters.ToArray());
+            dgvRecipes.DataSource = dataTable;
+            dgvRecipes.Columns["Id"].Visible = false;
         }
 
         private void dgvRecipes_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
@@ -230,23 +254,18 @@ namespace RecipeBookApp
         }
         private void LoadFavoriteRecipes()
         {
-            using (MySqlConnection connection = new MySqlConnection(connectionString))
-            {
-                connection.Open();
-                string query = @"
-                    SELECT r.Id, r.Name AS 'Назва рецепту', r.Category AS 'Категорія', r.CookingTime AS 'Час приготування', r.TotalCalories AS 'Калорії'
-                    FROM Recipes r
-                    JOIN FavoriteRecipes f ON r.Id = f.RecipeId
-                    WHERE f.UserId = @userId";
-                using (MySqlDataAdapter adapter = new MySqlDataAdapter(query, connection))
-                {
-                    adapter.SelectCommand.Parameters.AddWithValue("@userId", loggedInUserId);
-                    DataTable dataTable = new DataTable();
-                    adapter.Fill(dataTable);
-                    dgvRecipes.DataSource = dataTable;
-                    dgvRecipes.Columns["Id"].Visible = false;
-                }
-            }
+            string query = @"
+            SELECT r.Id, r.Name AS 'Назва рецепту', r.Category AS 'Категорія', 
+               r.CookingTime AS 'Час приготування', r.TotalCalories AS 'Калорії'
+            FROM Recipes r
+            JOIN FavoriteRecipes f ON r.Id = f.RecipeId
+            WHERE f.UserId = @userId";
+
+            var parameter = new MySqlParameter("@userId", loggedInUserId);
+            DataTable table = GetDataTable(query, parameter);
+
+            dgvRecipes.DataSource = table;
+            dgvRecipes.Columns["Id"].Visible = false;
         }
         private void btnShowFavorites_Click(object sender, EventArgs e)
         {

@@ -1,20 +1,15 @@
 ﻿using MySql.Data.MySqlClient;
+using RecipeBookApp.Services;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace RecipeBookApp
 {
     public partial class AddRecipeForm : Form
     {
-        private List<Tuple<int, string, string, int>> ingredients = new List<Tuple<int, string, string, int>>();
+        private readonly List<Tuple<int, string, string, int>> ingredients = new();
+        private const string connectionString = "Server=localhost;Database=recipebookdb;Uid=root;Pwd=;";
 
         public AddRecipeForm()
         {
@@ -25,30 +20,27 @@ namespace RecipeBookApp
 
         private void LoadExistingIngredients()
         {
-            string connectionString = "Server=localhost;Database=recipebookdb;Uid=root;Pwd=;";
-            using (MySqlConnection connection = new MySqlConnection(connectionString))
+            using (var conn = new MySqlConnection(connectionString))
             {
                 try
                 {
-                    connection.Open();
-                    string query = "SELECT Id, Name, Calories FROM Ingredients";
-                    using (MySqlCommand command = new MySqlCommand(query, connection))
+                    conn.Open();
+                    const string query = "SELECT Id, Name, Calories FROM Ingredients";
+                    using (var cmd = new MySqlCommand(query, conn))
+                    using (var rdr = cmd.ExecuteReader())
                     {
-                        using (MySqlDataReader reader = command.ExecuteReader())
+                        while (rdr.Read())
                         {
-                            while (reader.Read())
-                            {
-                                int id = reader.GetInt32("Id");
-                                string name = reader.GetString("Name");
-                                int calories = reader.GetInt32("Calories");
-                                lstExistingIngredients.Items.Add(new Ingredient(id, name, calories));
-                            }
+                            int id = rdr.GetInt32("Id");
+                            string name = rdr.GetString("Name");
+                            int calories = rdr.GetInt32("Calories");
+                            lstExistingIngredients.Items.Add(new Ingredient(id, name, calories));
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Виникла помилка: {ex.Message}", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show($"Не вдалося завантажити інгредієнти: {ex.Message}", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -60,12 +52,11 @@ namespace RecipeBookApp
             toolTip.SetToolTip(txtIngredientCalories, "Калорії на 100 грам");
         }
 
-
         private class Ingredient
         {
-            public int Id { get; set; }
-            public string Name { get; set; }
-            public int Calories { get; set; }
+            public int Id { get; }
+            public string Name { get; }
+            public int Calories { get; }
 
             public Ingredient(int id, string name, int calories)
             {
@@ -74,40 +65,21 @@ namespace RecipeBookApp
                 Calories = calories;
             }
 
-            public override string ToString()
-            {
-                return $"{Name} - {Calories} калорій";
-            }
+            public override string ToString() => $"{Name} — {Calories} ккал";
         }
 
         private void btnAddIngredient_Click(object sender, EventArgs e)
         {
-            string ingredientName = txtIngredientName.Text.Trim();
-            string ingredientAmount = txtIngredientAmount.Text.Trim();
-            string ingredientCaloriesText = txtIngredientCalories.Text.Trim();
-
-            if (string.IsNullOrEmpty(ingredientName))
+            if (string.IsNullOrWhiteSpace(txtIngredientName.Text)
+                || !int.TryParse(txtIngredientAmount.Text, out int amt)
+                || !int.TryParse(txtIngredientCalories.Text, out int cal))
             {
-                MessageBox.Show("Будь ласка, введіть назву інгредієнта.", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Перевірте правильність введених даних для інгредієнта.", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
-            if (string.IsNullOrEmpty(ingredientAmount) || !int.TryParse(ingredientAmount, out int amount))
-            {
-                MessageBox.Show("Будь ласка, введіть правильну кількість грамів для інгредієнта.", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            if (string.IsNullOrEmpty(ingredientCaloriesText) || !int.TryParse(ingredientCaloriesText, out int ingredientCalories))
-            {
-                MessageBox.Show("Будь ласка, введіть правильну кількість калорій для інгредієнта.", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            int ingredientId = -1;
-            string ingredient = $"{ingredientName} - {ingredientAmount} грам - {ingredientCalories} калорій на 100г";
-            ingredients.Add(new Tuple<int, string, string, int>(ingredientId, ingredientName, ingredientAmount, ingredientCalories));
-            lstIngredients.Items.Add(ingredient);
+            ingredients.Add(Tuple.Create(-1, txtIngredientName.Text.Trim(), txtIngredientAmount.Text.Trim(), cal));
+            lstIngredients.Items.Add($"{txtIngredientName.Text.Trim()} — {amt} г — {cal} ккал/100г");
 
             txtIngredientName.Clear();
             txtIngredientAmount.Clear();
@@ -116,136 +88,101 @@ namespace RecipeBookApp
 
         private void lstExistingIngredients_DoubleClick(object sender, EventArgs e)
         {
-            if (lstExistingIngredients.SelectedItem != null)
+            if (lstExistingIngredients.SelectedItem is Ingredient ing)
             {
-                var selectedIngredient = (Ingredient)lstExistingIngredients.SelectedItem;
-                int ingredientId = selectedIngredient.Id;
-                string ingredientName = selectedIngredient.Name;
-                int ingredientCalories = selectedIngredient.Calories;
-
-                IngredientAmountForm amountForm = new IngredientAmountForm(ingredientName);
-                if (amountForm.ShowDialog() == DialogResult.OK)
+                using var amountForm = new IngredientAmountForm(ing.Name);
+                if (amountForm.ShowDialog() == DialogResult.OK
+                    && int.TryParse(amountForm.IngredientAmount, out int qty))
                 {
-                    string ingredientAmount = amountForm.IngredientAmount;
-                    string ingredient = $"{ingredientName} - {ingredientAmount} грам - {ingredientCalories} калорій на 100г";
-                    ingredients.Add(new Tuple<int, string, string, int>(ingredientId, ingredientName, ingredientAmount, ingredientCalories));
-                    lstIngredients.Items.Add(ingredient);
+                    ingredients.Add(Tuple.Create(ing.Id, ing.Name, amountForm.IngredientAmount, ing.Calories));
+                    lstIngredients.Items.Add($"{ing.Name} — {qty} г — {ing.Calories} ккал/100г");
                 }
             }
         }
 
         private void btnAddRecipe_Click(object sender, EventArgs e)
         {
-            if (!AreRequiredFieldsFilled())
+            string name = txtName.Text.Trim();
+            string description = txtDescription.Text.Trim();
+            string cookingTimeText = txtCookingTime.Text.Trim();
+            string category = txtCategory.Text.Trim();
+            string totalCaloriesText = txtTotalCalories.Text.Trim();
+            string instructions = txtInstructions.Text.Trim();
+
+            if (!RecipeValidator.Validate(
+                    name,
+                    description,
+                    cookingTimeText,
+                    category,
+                    totalCaloriesText,
+                    instructions,
+                    out int cookingTime,
+                    out int totalCalories,
+                    out string errorMessage))
             {
-                MessageBox.Show("Будь ласка, заповніть всі обов'язкові поля.", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(errorMessage, "Помилка валідації", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             try
             {
-                int recipeId = AddRecipeToDatabase();
+                using (var conn = new MySqlConnection(connectionString))
+                {
+                    conn.Open();
+                    const string insertRecipe = @"
+                        INSERT INTO Recipes
+                            (Name, Description, CookingTime, Category, TotalCalories, CookingInstructions, VideoUrl, ImageUrl)
+                        VALUES
+                            (@Name, @Description, @CookingTime, @Category, @TotalCalories, @CookingInstructions, @VideoUrl, @ImageUrl);
+                        SELECT LAST_INSERT_ID();";
 
-                AddIngredientsToRecipe(recipeId);
+                    using (var cmd = new MySqlCommand(insertRecipe, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@Name", name);
+                        cmd.Parameters.AddWithValue("@Description", description);
+                        cmd.Parameters.AddWithValue("@CookingTime", cookingTime);
+                        cmd.Parameters.AddWithValue("@Category", category);
+                        cmd.Parameters.AddWithValue("@TotalCalories", totalCalories);
+                        cmd.Parameters.AddWithValue("@CookingInstructions", instructions);
+                        cmd.Parameters.AddWithValue("@VideoUrl", txtVideoUrl.Text.Trim());
+                        cmd.Parameters.AddWithValue("@ImageUrl", txtImageUrl.Text.Trim());
+
+                        int recipeId = Convert.ToInt32(cmd.ExecuteScalar());
+
+                        foreach (var ing in ingredients)
+                        {
+                            int ingId = ing.Item1;
+                            if (ingId == -1)
+                            {
+                                const string insertIng = @"
+                                    INSERT INTO Ingredients (Name, Calories)
+                                    VALUES (@Name, @Calories);
+                                    SELECT LAST_INSERT_ID();";
+                                using var cmdIng = new MySqlCommand(insertIng, conn);
+                                cmdIng.Parameters.AddWithValue("@Name", ing.Item2);
+                                cmdIng.Parameters.AddWithValue("@Calories", ing.Item4);
+                                ingId = Convert.ToInt32(cmdIng.ExecuteScalar());
+                            }
+
+                            const string insertLink = @"
+                                INSERT INTO RecipeIngredients (RecipeId, IngredientId, Quantity)
+                                VALUES (@RecipeId, @IngredientId, @Quantity)";
+                            using var cmdLink = new MySqlCommand(insertLink, conn);
+                            cmdLink.Parameters.AddWithValue("@RecipeId", recipeId);
+                            cmdLink.Parameters.AddWithValue("@IngredientId", ingId);
+                            cmdLink.Parameters.AddWithValue("@Quantity", ing.Item3);
+                            cmdLink.ExecuteNonQuery();
+                        }
+                    }
+                }
 
                 MessageBox.Show("Рецепт успішно додано!", "Підтвердження", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                this.Close();
+                Close();
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Виникла помилка: {ex.Message}", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"Помилка при збереженні рецепту: {ex.Message}", "Помилка", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-        }
-        private bool AreRequiredFieldsFilled()
-        {
-            return !string.IsNullOrWhiteSpace(txtName.Text)
-                && !string.IsNullOrWhiteSpace(txtDescription.Text)
-                && !string.IsNullOrWhiteSpace(txtCookingTime.Text)
-                && !string.IsNullOrWhiteSpace(txtCategory.Text)
-                && !string.IsNullOrWhiteSpace(txtTotalCalories.Text)
-                && !string.IsNullOrWhiteSpace(txtInstructions.Text);
-        }
-
-        private int AddRecipeToDatabase()
-        {
-            string connectionString = "Server=localhost;Database=recipebookdb;Uid=root;Pwd=;";
-            using (MySqlConnection connection = new MySqlConnection(connectionString))
-            {
-                connection.Open();
-                string query = @"
-            INSERT INTO Recipes (Name, Description, CookingTime, Category, TotalCalories, CookingInstructions, VideoUrl, ImageUrl)
-            VALUES (@Name, @Description, @CookingTime, @Category, @TotalCalories, @CookingInstructions, @VideoUrl, @ImageUrl);
-            SELECT LAST_INSERT_ID();";
-
-                using (MySqlCommand command = new MySqlCommand(query, connection))
-                {
-                    command.Parameters.AddWithValue("@Name", txtName.Text.Trim());
-                    command.Parameters.AddWithValue("@Description", txtDescription.Text.Trim());
-                    command.Parameters.AddWithValue("@CookingTime", txtCookingTime.Text.Trim());
-                    command.Parameters.AddWithValue("@Category", txtCategory.Text.Trim());
-                    command.Parameters.AddWithValue("@TotalCalories", txtTotalCalories.Text.Trim());
-                    command.Parameters.AddWithValue("@CookingInstructions", txtInstructions.Text.Trim());
-                    command.Parameters.AddWithValue("@VideoUrl", txtVideoUrl.Text.Trim());
-                    command.Parameters.AddWithValue("@ImageUrl", txtImageUrl.Text.Trim());
-
-                    return Convert.ToInt32(command.ExecuteScalar());
-                }
-            }
-        }
-
-        private void AddIngredientsToRecipe(int recipeId)
-        {
-            string connectionString = "Server=localhost;Database=recipebookdb;Uid=root;Pwd=;";
-            using (MySqlConnection connection = new MySqlConnection(connectionString))
-            {
-                connection.Open();
-
-                foreach (var ingredient in ingredients)
-                {
-                    int ingredientId = ingredient.Item1;
-
-                    if (ingredientId == -1)
-                    {
-                        ingredientId = InsertNewIngredient(connection, ingredient.Item2, ingredient.Item4);
-                    }
-
-                    InsertRecipeIngredient(connection, recipeId, ingredientId, ingredient.Item3);
-                }
-            }
-        }
-
-        private int InsertNewIngredient(MySqlConnection connection, string name, double calories)
-        {
-            string query = @"
-        INSERT INTO Ingredients (Name, Calories)
-        VALUES (@Name, @Calories);
-        SELECT LAST_INSERT_ID();";
-
-            using (MySqlCommand command = new MySqlCommand(query, connection))
-            {
-                command.Parameters.AddWithValue("@Name", name);
-                command.Parameters.AddWithValue("@Calories", calories);
-                return Convert.ToInt32(command.ExecuteScalar());
-            }
-        }
-
-        private void InsertRecipeIngredient(MySqlConnection connection, int recipeId, int ingredientId, string quantity)
-        {
-            string query = @"
-        INSERT INTO RecipeIngredients (RecipeId, IngredientId, Quantity)
-        VALUES (@RecipeId, @IngredientId, @Quantity)";
-
-            using (MySqlCommand command = new MySqlCommand(query, connection))
-            {
-                command.Parameters.AddWithValue("@RecipeId", recipeId);
-                command.Parameters.AddWithValue("@IngredientId", ingredientId);
-                command.Parameters.AddWithValue("@Quantity", quantity);
-                command.ExecuteNonQuery();
-            }
-        }
-
-        private void lstIngredients_SelectedIndexChanged(object sender, EventArgs e)
-        {
         }
     }
 }
